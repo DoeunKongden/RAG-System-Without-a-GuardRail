@@ -1,12 +1,17 @@
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
+
+from kongden_chatbot.src.guardrails.input.base import BaseInputGuardrail
+from kongden_chatbot.src.models.base import GuardrailDecision
+from kongden_chatbot.src.models.guardrail import InputGuardrailRequest, InputGuardrailResult
 
 MAX_INPUT_LENGTH = 2000
 
 _INJECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r'\bignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|context)\b', re.IGNORECASE), "ignore_instructions"),
-    (re.compile(r'\bforget\s+(all\s+)?(previous|prior|your)\s+(instructions?|training|guidelines?)\b', re.IGNORECASE), "forget_instructions"),
+    (re.compile(r'\bforget\s+(all\s+)?(previous|prior|your\s+)?(previous\s+|prior\s+)?(instructions?|training|guidelines?)\b', re.IGNORECASE), "forget_instructions"),
     (re.compile(r'\bdisregard\s+(all\s+)?(previous|prior|your)\s+(instructions?|rules?|guidelines?)\b', re.IGNORECASE), "disregard_instructions"),
     (re.compile(r'\boverride\s+(your\s+)?(instructions?|rules?|guidelines?)\b', re.IGNORECASE), "override_instructions"),
     (re.compile(r'\bdo\s+not\s+follow\s+(your\s+)?(instructions?|rules?|guidelines?)\b', re.IGNORECASE), "override_instructions"),
@@ -31,10 +36,40 @@ class SanitizationResult:
         return len(self.injection_flags) > 0
 
 
-class InputSanitizer:
+class InputSanitizer(BaseInputGuardrail):
+    MODEL_NAME = "rule-based-sanitizer"
+
     def __init__(self, max_length: int = MAX_INPUT_LENGTH, normalize_unicode: bool = True):
         self.max_length = max_length
         self.normalize_unicode = normalize_unicode
+
+    # ------------------------------------------------------------------
+    # BaseInputGuardrail interface
+    # ------------------------------------------------------------------
+
+    def check(self, request: InputGuardrailRequest) -> InputGuardrailResult:
+        """Sanitize the request text and return a guardrail decision.
+
+        WARN  — injection patterns detected (pass to downstream with caution).
+        ALLOW — clean input after normalization/truncation.
+        """
+        start = time.perf_counter()
+        result = self.sanitize_full(request.message)
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        decision = GuardrailDecision.WARN if result.has_injection_attempt else GuardrailDecision.ALLOW
+
+        return InputGuardrailResult(
+            request_id=request.request_id,
+            decision=decision,
+            violations=[],          # injection flags live in SanitizationResult, not GuardrailViolation
+            model=self.MODEL_NAME,
+            latency_ms=latency_ms,
+        )
+
+    # ------------------------------------------------------------------
+    # Sanitization helpers (also usable directly)
+    # ------------------------------------------------------------------
 
     def sanitize(self, text: str) -> tuple[str, bool]:
         """Returns (cleaned_text, was_modified)."""

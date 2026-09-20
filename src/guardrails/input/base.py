@@ -1,10 +1,18 @@
-# TODO: Define the abstract base class for input guardrails.
-#
-# Requirements:
-# - Create an abstract class `BaseInputGuardrail` using Python's `abc.ABC`.
-# - Define an abstract method `check(request: InputGuardrailRequest) -> InputGuardrailResult`
-#   that all concrete input guardrail implementations must override.
-# - Optionally add __enter__ / __exit__ lifecycle methods if your implementation
-#   holds external connections (e.g. an HTTP client to Ollama).
-#
-# Reference models: InputGuardrailRequest, InputGuardrailResult (src/models/guardrail.py)
+from abc import ABC, abstractmethod
+
+from kongden_chatbot.src.models.guardrail import InputGuardrailRequest, InputGuardrailResult
+
+
+class BaseInputGuardrail(ABC):
+    """Abstract base for all input guardrail implementations."""
+
+    @abstractmethod
+    def check(self, request: InputGuardrailRequest) -> InputGuardrailResult:
+        """Inspect the request and return an allow / warn / block decision."""
+        ...
+
+    def __enter__(self) -> "BaseInputGuardrail":
+        return self
+
+    def __exit__(self, *_args) -> None:
+        pass

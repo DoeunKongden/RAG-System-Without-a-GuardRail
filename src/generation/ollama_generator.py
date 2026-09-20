@@ -11,8 +11,9 @@ from src.models import (
     PromptContext,
     RetrievedChunk,
     SourceCitation,
-    VerifierResult,
 )
+from src.generation.verifier import AnswerVerifier
+from src.models.guardrail import VerifierRequest
 from src.retrieval.rerankers.cross_encoder import CrossEncoderReranker
 from src.retrieval.searchers.hybrid import HybridSearcher
 from src.models import SearchQuery
@@ -27,6 +28,7 @@ class OllamaGenerator(BaseGenerator):
         self._builder = PromptBuilder()
         self._searcher = HybridSearcher()
         self._reranker = CrossEncoderReranker()
+        self._verifier = AnswerVerifier()
         self._settings = settings
 
     # ── Core generation ───────────────────────────────────────────────────────
@@ -92,14 +94,12 @@ class OllamaGenerator(BaseGenerator):
             for c in top_chunks
         ]
 
-        # 5. Stub verifier result — wired properly once guardrails are implemented
-        verifier = VerifierResult(
-            is_grounded=True,
-            confidence=1.0,
-            hallucination_risk="low",
-            model="pending",
-            latency_ms=0.0,
-        )
+        # 5. Verify the answer is grounded in the retrieved chunks
+        verifier = self._verifier.verify(VerifierRequest(
+            query=query,
+            generated_answer=llm_response.content,
+            retrieved_chunks=[c.content for c in top_chunks],
+        ))
 
         return AugmentedResponse(
             llm_response=llm_response,

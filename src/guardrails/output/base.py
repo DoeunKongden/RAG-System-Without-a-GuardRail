@@ -1,9 +1,18 @@
-# TODO: Define the abstract base class for output guardrails.
-#
-# Requirements:
-# - Create an abstract class `BaseOutputGuardrail` using Python's `abc.ABC`.
-# - Define an abstract method `check(request: OutputGuardrailRequest) -> OutputGuardrailResult`
-#   that all concrete output guardrail implementations must override.
-# - Mirror the same lifecycle pattern used in BaseInputGuardrail.
-#
-# Reference models: OutputGuardrailRequest, OutputGuardrailResult (src/models/guardrail.py)
+from abc import ABC, abstractmethod
+
+from kongden_chatbot.src.models.guardrail import OutputGuardrailRequest, OutputGuardrailResult
+
+
+class BaseOutputGuardrail(ABC):
+    """Abstract base for all output guardrail implementations."""
+
+    @abstractmethod
+    def check(self, request: OutputGuardrailRequest) -> OutputGuardrailResult:
+        """Inspect the generated response and return an allow / warn / block decision."""
+        ...
+
+    def __enter__(self) -> "BaseOutputGuardrail":
+        return self
+
+    def __exit__(self, *_args) -> None:
+        pass

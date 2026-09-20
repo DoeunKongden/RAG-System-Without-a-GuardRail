@@ -1,28 +1,56 @@
-# TODO: Implement `LlamaGuardInputValidator` — the concrete input guardrail
-#       that calls the llama-guard3:1b model via Ollama to classify user queries.
-#
-# Steps:
-# 1. Inherit from `BaseInputGuardrail` (input/base.py).
-# 2. In __init__, load settings and create an httpx.Client pointed at OLLAMA_HOST.
-# 3. In `check(request)`:
-#    a. Format the user message using the LlamaGuard prompt template:
-#       <|begin_of_text|><|start_header_id|>user<|end_header_id|>
-#       Task: Check if the following message is safe.
-#       <UNSAFE_CONTENT_CATEGORIES>  ← list the SafetyCategory values
-#       <BEGIN CONVERSATION>
-#       User: {message}
-#       <END CONVERSATION>
-#       Provide your safety assessment ...
-#       <|eot_id|><|start_header_id|>assistant<|end_header_id|>
-#    b. POST to /api/generate with model=settings.guardrail_model, stream=False.
-#    c. Parse the response: first token is "safe" or "unsafe".
-#       If "unsafe", the second line contains the violated category codes (e.g. "S1,S3").
-#    d. Map category codes → SafetyCategory enum values.
-#    e. Return InputGuardrailResult with:
-#       - decision = GuardrailDecision.ALLOW if safe, else GuardrailDecision.BLOCK
-#       - violations = list of GuardrailViolation (one per violated category)
-#       - model = settings.guardrail_model
-#       - latency_ms = elapsed time
-#
-# LlamaGuard safety category codes (S1–S9) map to SafetyCategory enum in models/guardrail.py.
-# Reference: https://huggingface.co/meta-llama/Llama-Guard-3-1B
+import time
+
+import ollama
+
+from kongden_chatbot.src.config.settings import get_settings
+from kongden_chatbot.src.guardrails._shared import UNSAFE_CONTENT_CATEGORIES, parse_llamaguard_response
+from kongden_chatbot.src.guardrails.input.base import BaseInputGuardrail
+from kongden_chatbot.src.models.guardrail import InputGuardrailRequest, InputGuardrailResult
+
+_PROMPT_TEMPLATE = """\
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+
+Task: Check if there is unsafe content in the 'User' messages in the conversation \
+according to our safety policy with the following categories:
+
+<BEGIN UNSAFE CONTENT CATEGORIES>
+{categories}
+<END UNSAFE CONTENT CATEGORIES>
+
+<BEGIN CONVERSATION>
+
+User: {message}
+
+<END CONVERSATION>
+
+Provide your safety assessment for ONLY THE LAST User message in the above conversation:
+ - First line must read 'safe' or 'unsafe'.
+ - If unsafe, a second line must include a comma-separated list of violated categories.\
+<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+""".format(categories=UNSAFE_CONTENT_CATEGORIES, message="{message}")
+
+
+class LlamaGuardInputValidator(BaseInputGuardrail):
+    """Calls llama-guard3:1b via Ollama to classify user input for safety."""
+
+    def __init__(self) -> None:
+        settings = get_settings()
+        self._model = settings.guardrail_model
+        self._client = ollama.Client(host=str(settings.ollama_host))
+
+    def check(self, request: InputGuardrailRequest) -> InputGuardrailResult:
+        prompt = _PROMPT_TEMPLATE.format(message=request.message)
+
+        start = time.perf_counter()
+        response = self._client.generate(model=self._model, prompt=prompt, stream=False)
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        decision, violations = parse_llamaguard_response(response.response)
+
+        return InputGuardrailResult(
+            request_id=request.request_id,
+            decision=decision,
+            violations=violations,
+            model=self._model,
+            latency_ms=latency_ms,
+        )

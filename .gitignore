@@ -1,0 +1,16 @@
+# Environment — never commit secrets or local config
+.env*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Streamlit
+.streamlit/
+
+# macOS
+.DS_Store
